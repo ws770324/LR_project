@@ -1,0 +1,88 @@
+---
+title: "Logist_AUS2017"
+author: "Chen-Tze Tsai"
+date: "February 17, 2020"
+output: html_document
+---
+
+```{r}
+require(Hmisc)
+require(MASS)
+require(car)
+require(ResourceSelection)
+
+setwd('/Users/tiger/Dropbox/JT/Final Project/')
+auo <- read.table('./data/AUO 2017.txt', header = F, sep = ',')
+auo.1 <- auo[which(auo[, 7] <= 163), ]    # First rounds
+win <- auo.1[, c(8:17, 32:40)]; colnames(win) <- paste0('V', 1:19)
+los <- auo.1[, c(18:27, 41:49)]; colnames(los) <- paste0('V', 1:19)
+auo.2 <- rbind(win, los)
+colnames(auo.2) <- c('id', 'seed', 'entry', 'name', 'hand', 'ht',
+                     'ioc', 'age', 'rank', 'rank_points', 'ace',
+                     'df', 'svpt', 'first_in', 'first_won', 'second_won',
+                     'svgms', 'bp_saved', 'bp_faced')
+attach(auo.2)
+second_lose <- svpt-first_in-df-second_won
+save_rate <- ifelse(bp_faced != 0, bp_saved/bp_faced, 1)
+first_rate <- first_won/first_in
+second_rate <- second_won/(second_lose+second_won)
+result <- rep(c(1, 0), each = 64)
+detach(auo.2)
+
+auo.3 <- auo.2[, c('age', 'ace', 'df', 'svpt', 'first_in', 'first_won',
+                   'second_won', 'svgms', 'bp_saved', 'bp_faced')]
+firstrd <- cbind(auo.3, second_lose, save_rate, first_rate, second_rate, result)
+var.name <- names(firstrd)
+
+# Summary statistics (Table 1)
+out <- c()
+for (i in 1:14){
+  xx <- firstrd[, var.name[i]]
+  mt <- mean(xx)
+  st <- sd(xx)
+  mm <- tapply(xx, result, mean)
+  ss <- tapply(xx, result, sd)
+  test <- t.test(xx ~ result)
+  out <- rbind(out, c(mt, st, mm[1], ss[1], mm[2], ss[2], round(test$p.value, 3)))
+  
+}
+rownames(out) <- var.name[1:14]
+colnames(out) <- c('Mean (total)', 'SD (total)', 'Mean (win)', 'SD (win)',
+                   'Mean (lose)', 'SD (lose)', 'p.value')
+out
+
+# Correlations among independent variables
+firstsig <- firstrd[, c('ace', 'df', 'bp_saved', 'bp_faced', 'second_lose',
+                        'save_rate', 'first_rate', 'second_rate')]
+pairs(firstsig, cex = 0.7, col = ifelse(result == 0, 4, 2))
+rcorr(as.matrix(firstsig))
+
+# Logistic regression
+firstwork <- cbind(firstsig, result)
+out.1 <- glm(result ~ ., data = firstwork, family = 'binomial')
+summary(out.1)
+
+# Backward selection
+stepAIC(out.1)
+# Bi-directional selection
+stepAIC(out.1, scope = list(upper = ~., lower = ~1))
+
+final <- glm(result ~ df+save_rate+first_rate+second_rate,
+             data = firstwork, family = binomial)
+summary(final)
+
+# Interpretation of model (odds ratio)
+exp(final$coefficient)
+confint(final)
+
+# Goodness of fit
+anova(final, test = 'LRT')
+hoslem.test(final$y, fitted(final))
+
+# Collinearity between first_rate and second_rate
+firstreg <- firstrd[, c('df', 'save_rate', 'first_rate', 'second_rate')]
+pairs(firstreg, col = ifelse(result == 0, 4, 2))
+
+# Variance inflation factor
+vif(final)
+```
